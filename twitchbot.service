@@ -1,0 +1,9 @@
+[Unit]
+Description=Arthas twitch bot
+
+[Service]
+Type=simple
+ExecStart=/root/twitchbot/run.sh
+
+[Install]
+WantedBy=multi-user.target

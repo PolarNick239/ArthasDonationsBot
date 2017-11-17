@@ -11,6 +11,9 @@ logger = logging.getLogger("Stream monitor")
 StreamerState = namedtuple('StreamerState',
                            'user_id title game_id')
 
+ChannelState = namedtuple('ChannelState',
+                          'status')
+
 
 class TwitchStreamerMonitor:
     def __init__(self, client_id, username):
@@ -31,9 +34,19 @@ class TwitchStreamerMonitor:
         self.streamer_state = FileStorage("streamer_state.json", dirpath="state")
         self.streamer_state.load(StreamerState)
 
+        self.channel_status_callbacks = []
+
+        self.channel_state = FileStorage("channel_state.json", dirpath="state")
+        self.channel_state.load(ChannelState)
+
         self.previous_query_time = 0
         self.query_timeout = 1.0
         self.monitor_timeout = 10.0
+
+        self.cache_get_user_id = {}
+        self.cache_get_game = {}
+
+        self.ad_separators = [" http://", " [http://"]
 
     def start(self):
         thread = threading.Thread(target=self.run_loop, name="Stream monitor")
@@ -68,6 +81,14 @@ class TwitchStreamerMonitor:
                     if self.streamer_state.value is not None:
                         changed = True
                         self.notify_stream_stopped()
+
+                    current_channel = self.get_channel(self.user_id)
+                    channel_status = ChannelState(status=current_channel['status'])
+                    if self.channel_state.value is None or channel_status.status != self.channel_state.value.status:
+                        self.notify_channel_status_changed(channel_status.status)
+
+                        self.channel_state.value = channel_status
+                        self.channel_state.save()
                     continue
 
                 stream_id = current_state["stream_id"]
@@ -97,6 +118,14 @@ class TwitchStreamerMonitor:
                     self.streamer_state.save()
 
                 time.sleep(self.monitor_timeout)
+
+    def notify_channel_status_changed(self, status):
+        logger.info("Channel status changed! status={}".format(status))
+        for callback in self.channel_status_callbacks:
+            callback(status)
+
+    def add_channel_status_callback(self, callback):
+        self.channel_status_callbacks.append(callback)
 
     def notify_stream_started(self, title, game_name, stream_id):
         logger.info("Stream started! stream_id={} game={} title={}".format(stream_id, title, game_name))
@@ -130,19 +159,29 @@ class TwitchStreamerMonitor:
     def add_stop_callback(self, callback):
         self.stop_callbacks.append(callback)
 
-    def get_user_id(self, login):
+    def get_user_id(self, username):
         # https://dev.twitch.tv/docs/api/reference#get-users
-        logger.debug("Searching for user with login={}...".format(login))
-        user_data = self.query('users', login=login)
-        if not user_data:
-            raise KeyError("No user with login={} found!".format(login))
+        if username in self.cache_get_user_id:
+            user_data = self.cache_get_user_id[username]
+        else:
+            logger.debug("Searching for user with login={}...".format(username))
+            user_data = self.query('users', login=username)
+            self.cache_get_user_id[username] = user_data
 
-        logger.info("User with login={} has id={}.".format(login, user_data['id']))
+        if not user_data:
+            raise KeyError("No user with login={} found!".format(username))
+
+        logger.info("User with login={} has id={}.".format(username, user_data['id']))
         return user_data['id']
 
     def get_game_info(self, game_id):
         # https://dev.twitch.tv/docs/api/reference#get-games
-        game_data = self.query('games', id=game_id)
+        if game_id in self.cache_get_game:
+            game_data = self.cache_get_game[game_id]
+        else:
+            game_data = self.query('games', id=game_id)
+            self.cache_get_game[game_id] = game_data
+
         if not game_data:
             logger.warning("No game with id={} found!".format(game_id))
             return {"name": "Unknown"}
@@ -161,8 +200,7 @@ class TwitchStreamerMonitor:
         game_id = stream_data['game_id']
         stream_id = stream_data['id']
 
-        ad_separators = [" [http://"]
-        for ad_separator in ad_separators:
+        for ad_separator in self.ad_separators:
             if ad_separator in title:
                 title = title[:title.index(ad_separator)]
 
@@ -183,6 +221,18 @@ class TwitchStreamerMonitor:
                 'video_id': video_id,
                 'offset': offset,
                 'duration': duration}
+
+    def get_channel(self, channel_id):
+        # https://dev.twitch.tv/docs/v5/reference/channels#get-channel-by-id
+        channel_data = self.query_v5('channels', entity_id=channel_id)
+
+        status = channel_data['status']
+
+        for ad_separator in self.ad_separators:
+            if ad_separator in status:
+                status = status[:status.index(ad_separator)]
+
+        return {'status': status}
 
     def ensure_timeout(self, *, query_following=True):
         current_time = time.time()
@@ -248,7 +298,7 @@ class TwitchStreamerMonitor:
             elif data['status'] == status_not_found:
                 logger.error(data)
                 raise KeyError("url={} ".format(url) + data['error'])
-            else:
+            elif method not in ['channels']:
                 raise Exception("url={} ".format(url) + data['error'])
 
         return data
@@ -263,8 +313,6 @@ if __name__ == '__main__':
     logging.getLogger("urllib3").setLevel(logging.WARNING)
 
     monitor = TwitchStreamerMonitor(config.client_id, "arthas")
-    res = monitor.get_clip("OutstandingThoughtfulHorseRaccAttack")
-    x = 239
 
     try:
         monitor_thread = monitor.start()

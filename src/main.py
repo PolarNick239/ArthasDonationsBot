@@ -47,6 +47,8 @@ class ArthasBot:
                         deleted_number += 1
             logger.info("{} clips loaded! ({} deleted)".format(len(self.clips), deleted_number))
 
+        self.twitch_monitor.add_channel_status_callback(self.on_channel_status_changed)
+
         self.twitch_monitor.add_start_callback(self.on_stream_started)
         self.twitch_monitor.add_game_changed_callback(self.on_game_changed)
         self.twitch_monitor.add_title_changed_callback(self.on_title_changed)
@@ -104,6 +106,10 @@ class ArthasBot:
         self.telegram_bot.send_message("Папич отрубил :(((9(9((9(((((99(9")
 
         self.stop_donates_detection()
+
+    @synchronized
+    def on_channel_status_changed(self, status):
+        self.telegram_bot.send_message("Статус канала: {}".format(status))
 
     def start_donates_detection(self):
         logger.info("Starting video streaming for {}...".format(self.twitch_channel))

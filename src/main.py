@@ -257,7 +257,7 @@ class ArthasBot:
 if __name__ == '__main__':
     import config
 
-    logging.basicConfig(level=logging.DEBUG, format=config.logger_format, filename='twitchbot.log', filemode='w')
+    logging.basicConfig(level=logging.DEBUG, format=config.logger_format, filename='twitchbot.log', filemode='a')
 
     logging.getLogger("requests").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)

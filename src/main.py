@@ -220,29 +220,29 @@ class ArthasBot:
 
         if consumed_clip is not None:
             logger.info("Clip consumed: old={}, new={}!".format(consumed_clip, new_clip))
-            telegram_message = self.telegram_bot.edit_message(consumed_clip.telegram_message_id, message_text)
-            logger.info("Clip {} replaced clip {} in telegram message with id={}!".format(clip_id, consumed_clip.clip_id, telegram_message.message_id))
+            #telegram_message = self.telegram_bot.edit_message(consumed_clip.telegram_message_id, message_text)
+            #logger.info("Clip {} replaced clip {} in telegram message with id={}!".format(clip_id, consumed_clip.clip_id, -1))
 
             clip_storage.value = ClipInfo(clip_url=clip_url, clip_id=clip_id,
                                           video_id=new_clip.video_id,
                                           offset=new_clip.offset,
                                           duration=new_clip.duration,
                                           username=username, message=message,
-                                          telegram_message_id=telegram_message.message_id)
+                                          telegram_message_id=-1)
             clip_storage.save()
         elif intersected_clip is not None:
             logger.info("Clip ignored because of intersection: old={}, new={}!".format(intersected_clip, new_clip))
         else:
             logger.info("Clip detected {}!".format(new_clip))
-            telegram_message = self.telegram_bot.send_message(message_text)
-            logger.info("Clip {} sent in telegram message with id={}!".format(clip_id, telegram_message.message_id))
+            #telegram_message = self.telegram_bot.send_message(message_text)
+            #logger.info("Clip {} sent in telegram message with id={}!".format(clip_id, telegram_message.message_id))
 
             clip_storage.value = ClipInfo(clip_url=clip_url, clip_id=clip_id,
                                           video_id=new_clip.video_id,
                                           offset=new_clip.offset,
                                           duration=new_clip.duration,
                                           username=username, message=message,
-                                          telegram_message_id=telegram_message.message_id)
+                                          telegram_message_id=-1)
             clip_storage.save()
 
         self.clips_ids_by_video_id.value[new_clip.video_id].append(clip_id)

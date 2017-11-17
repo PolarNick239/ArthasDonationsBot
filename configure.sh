@@ -1,6 +1,11 @@
 # IP=51.15.75.185
 # scp -r ~/coding/experiments/twitchbot root@${IP}:/root/
 
+# https://askubuntu.com/a/849087
+# nano /etc/apt/apt.conf.d/20auto-upgrades
+# from APT::Periodic::Unattended-Upgrade "1";
+# to   APT::Periodic::Unattended-Upgrade "0";
+
 python_version=3.5
 
 apt update

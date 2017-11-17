@@ -1,6 +1,9 @@
 import cv2
 import logging
+import itertools
 import numpy as np
+import scipy
+import scipy.ndimage
 
 logger = logging.getLogger("Donates detector")
 
@@ -26,7 +29,7 @@ header_sat = from_100_to_255([70, 100])
 header_val = from_100_to_255([70, 100])
 
 
-def letters_number_per_row(rgb, hue_range, sat_range, val_range, radius):
+def detect_letters(rgb, hue_range, sat_range, val_range, radius):
     assert (3 == rgb.shape[-1])
 
     hsv = cv2.cvtColor(rgb, cv2.COLOR_BGR2HSV)
@@ -59,47 +62,69 @@ def letters_number_per_row(rgb, hue_range, sat_range, val_range, radius):
     mask = np.uint8(mask) * 255
     blobs = detector.detect(mask)
 
-    letters = np.zeros(len(mask), np.float32)
-
     # blobs_mask = np.uint8(mask)
     # blobs_mask = np.dstack([blobs_mask, blobs_mask, blobs_mask])
-    for blob in blobs:
-        # cv2.circle(blobs_mask, (int(blob.pt[0]), int(blob.pt[1])), int(blob.size), (255, 0, 0), thickness=2)
-        from_y = max(0, int(blob.pt[1] - blob.size))
-        to_y = min(len(letters), int(blob.pt[1] + blob.size))
-        if from_y >= 0 and to_y < len(letters):
-            letters[from_y:to_y] += 1
+    # for blob in blobs:
+    #     cv2.circle(blobs_mask, (int(blob.pt[0]), int(blob.pt[1])), int(blob.size), (255, 0, 0), thickness=2)
     # cv2.imshow("blobs_mask", blobs_mask)
     # cv2.waitKey()
 
+    return blobs
+
+
+def letter_graph_by_x(blobs, width, height):
+    letters_by_x = np.zeros(width, np.float32)
+
+    for blob in blobs:
+        from_x = max(0, int(blob.pt[0] - blob.size))
+        to_x = min(width, int(blob.pt[0] + blob.size))
+        letters_by_x[from_x:to_x] += 1
+
     # import matplotlib.pyplot as plt
-    # plt.plot(letters)
+    # plt.plot(letters_by_x)
     # plt.show()
 
-    return letters
+    return letters_by_x
+
+
+def letter_graph_by_y(letters_blobs, width, height):
+    letters_by_y = np.zeros(height, np.float32)
+
+    for blob in letters_blobs:
+        from_y = max(0, int(blob.pt[1] - blob.size))
+        to_y = min(height, int(blob.pt[1] + blob.size))
+        letters_by_y[from_y:to_y] += 1
+
+    # import matplotlib.pyplot as plt
+    # plt.plot(letters_by_y)
+    # plt.show()
+
+    return letters_by_y
 
 
 def detect_donate(img):
+    height, width = img.shape[:2]
+
     img_from_y = 750
     img = img[img_from_y:, :, :]
     radius = 25
 
-    header_graph = letters_number_per_row(img, header_hue, header_sat, header_val, radius)
-    donate_header_y = np.argmax(header_graph)
-    if header_graph[donate_header_y] < 7:
+    header_letters = detect_letters(img, header_hue, header_sat, header_val, radius)
+    header_graph_y = letter_graph_by_y(header_letters, width, height)
+    donate_header_y = np.argmax(header_graph_y)
+    if header_graph_y[donate_header_y] < 7:
         return None
 
-    text_graph = letters_number_per_row(img, donate_hue, donate_sat, donate_val, radius)
-    if np.max(text_graph) < 8:
+    donate_letters = detect_letters(img, donate_hue, donate_sat, donate_val, radius)
+    donate_graph_y = letter_graph_by_y(donate_letters, width, height)
+    if np.max(donate_graph_y) < 8:
         return None
 
-    threshold = np.max(text_graph) / 2
-    indices = np.nonzero(text_graph > threshold)
+    threshold = np.max(donate_graph_y) / 2
+    indices = np.nonzero(donate_graph_y > threshold)
     from_y, to_y = np.min(indices) - radius, np.max(indices) + 3 * radius
 
-    # if not (from_y - 1.5 * radius < donate_header_y and donate_header_y < from_y + radius):
-    #     return None
-    if not (from_y - 3 * radius < donate_header_y and donate_header_y < from_y + radius):
+    if not (from_y - 3 * radius < donate_header_y < from_y + radius):
         return None
 
     from_y = donate_header_y - radius
@@ -107,7 +132,20 @@ def detect_donate(img):
     from_y = max(0, from_y)
     to_y = min(to_y, len(img))
 
-    return img_from_y + from_y, img_from_y + to_y
+    donate_graph_x = letter_graph_by_x([blob for blob in itertools.chain(header_letters, donate_letters)
+                                        if from_y <= blob.pt[1] <= to_y],
+                                       width, height)
+
+    donate_graph_x = scipy.ndimage.filters.maximum_filter1d(donate_graph_x, 3 * radius)
+    max_radius = 0
+    for donate_graph_x_part in [donate_graph_x[:width // 2][::-1], donate_graph_x[width // 2:]]:
+        donate_graph_x_part[-1] = 0
+        max_radius = max(max_radius, np.nonzero(donate_graph_x_part == 0)[0][0])
+
+    from_x = max(0, width // 2 - max_radius - 3 * radius)
+    to_x = min(width, width // 2 + max_radius + 3 * radius)
+
+    return from_x, to_x, img_from_y + from_y, img_from_y + to_y
 
 
 def estimate_is_appeared(img0, img1):
@@ -136,12 +174,13 @@ def extract_donate_robust(prev, cur, next):
     img[~is_appeared] = 0
     img[is_gone] = 0
 
-    y_range = detect_donate(img)
+    xy_range = detect_donate(img)
 
-    if y_range is None:
+    if xy_range is None:
         return None
     else:
-        return cur[y_range[0]:y_range[1]]
+        from_x, to_x, from_y, to_y = xy_range
+        return cur[from_y:to_y, from_x:to_x]
 
 
 if __name__ == '__main__':
@@ -165,11 +204,16 @@ if __name__ == '__main__':
                 img = img1
         else:
             img = cv2.imread(image_path)
-            y_range = detect_donate(img)
-            if y_range is None:
+            if img is None:
+                print("File not found: {}".format(image_path))
+                continue
+            xy_range = detect_donate(img)
+
+            if xy_range is None:
                 donate = None
             else:
-                donate = img[y_range[0]:y_range[1]]
+                from_x, to_x, from_y, to_y = xy_range
+                donate = img[from_y:to_y, from_x:to_x]
 
         if donate is None:
             print("NO!  {}".format(image_path))

@@ -2,8 +2,7 @@ oauth_key = "oauth:ooo239ooo239ooo239ooo239ooo239"
 client_id = "aaa239aaa239aaa239aaa239aaa239"
 telegram_token = "239239239:uuu239uuu239uuu239uuu239uuu239uuuoo"
 
-telegram_notifications_channel = "arthas_twitch"
-telegram_chat_channel = "arthas_chat"
+telegram_chat_channel = "arthas_twitch"
 
 nickname = "PolarNick239"
 channel = "arthas"

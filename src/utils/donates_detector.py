@@ -142,8 +142,11 @@ def detect_donate(img):
         donate_graph_x_part[-1] = 0
         max_radius = max(max_radius, np.nonzero(donate_graph_x_part == 0)[0][0])
 
-    from_x = max(0, width // 2 - max_radius - 3 * radius)
-    to_x = min(width, width // 2 + max_radius + 3 * radius)
+    #from_x = max(0, width // 2 - max_radius - 3 * radius)
+    #to_x = min(width, width // 2 + max_radius + 3 * radius)
+
+    from_x = 0
+    to_x = width
 
     return from_x, to_x, img_from_y + from_y, img_from_y + to_y
 

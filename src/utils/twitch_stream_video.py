@@ -92,11 +92,14 @@ class StreamVideoSnapshots:
         try:
             self.stopped = True
             if self.ffmpeg_process is not None:
+                logger.info("Stopping ffmpeg process...")
                 subprocess.Popen.kill(self.ffmpeg_process)
                 self.ffmpeg_process = None
             if self.streamlink_process is not None:
+                logger.info("Stopping streamlink process...")
                 subprocess.Popen.kill(self.streamlink_process)
                 self.streamlink_process = None
+            logger.info("Video stream stopped!")
         finally:
             self.lock.release()
 

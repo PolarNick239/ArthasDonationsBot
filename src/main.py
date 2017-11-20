@@ -202,23 +202,23 @@ class ArthasBot:
 
         intersected_clip = None
         consumed_clip = None
-        for old_clip_id in self.clips_ids_by_video_id.value[new_clip.video_id]:
-            old_clip = self.clips[old_clip_id].value
-            if old_clip is None:
-                continue
-
-            old_from = old_clip.offset
-            old_to = old_clip.offset + old_clip.duration
-            new_from = new_clip.offset
-            new_to = new_clip.offset + new_clip.duration
-
-            # if (new_from <= old_from and old_to < new_to) or (new_from < old_from and old_to <= new_to):
-            #     consumed_clip = old_clip
-            #     break
-            #
-            # no_intersection = (old_from >= new_to or old_to <= new_from)
-            # if not no_intersection:
-            #     intersected_clip = old_clip
+        # for old_clip_id in self.clips_ids_by_video_id.value[new_clip.video_id]:
+        #     old_clip = self.clips[old_clip_id].value
+        #     if old_clip is None:
+        #         continue
+        #
+        #     old_from = old_clip.offset
+        #     old_to = old_clip.offset + old_clip.duration
+        #     new_from = new_clip.offset
+        #     new_to = new_clip.offset + new_clip.duration
+        #
+        #     # if (new_from <= old_from and old_to < new_to) or (new_from < old_from and old_to <= new_to):
+        #     #     consumed_clip = old_clip
+        #     #     break
+        #     #
+        #     # no_intersection = (old_from >= new_to or old_to <= new_from)
+        #     # if not no_intersection:
+        #     #     intersected_clip = old_clip
 
         message_text = "{}: {}".format(username, clip_url)
 

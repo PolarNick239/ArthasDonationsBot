@@ -1,5 +1,6 @@
 import os
 import cv2
+import signal
 import logging
 import threading
 import subprocess
@@ -32,7 +33,7 @@ class StreamVideoSnapshots:
         streamlink_command = ["streamlink", "twitch.tv/{}".format(channel), "--default-stream", "1080p,1080p60", "--loglevel", "warning",
                               "-o", self.fifo_filename]
         logger.info("streamlink launched: {}".format(" ".join(streamlink_command)))
-        self.streamlink_process = subprocess.Popen(streamlink_command, stderr=subprocess.DEVNULL)
+        self.streamlink_process = subprocess.Popen(streamlink_command, stderr=subprocess.DEVNULL, preexec_fn=os.setsid)
 
         ffmpeg_command = ["ffmpeg",
                           '-i', self.fifo_filename,  # named pipe
@@ -42,7 +43,7 @@ class StreamVideoSnapshots:
                           '-an', '-sn',  # we want to disable audio processing (there is no audio)
                           '-f', 'image2pipe', '-']
         logger.info("ffmpeg launched:     {}".format(" ".join(ffmpeg_command)))
-        self.ffmpeg_process = subprocess.Popen(ffmpeg_command, stdout=subprocess.PIPE, bufsize=10 ** 8)
+        self.ffmpeg_process = subprocess.Popen(ffmpeg_command, stdout=subprocess.PIPE, bufsize=10 ** 8, preexec_fn=os.setsid)
 
         self.stopped = False
 
@@ -93,11 +94,11 @@ class StreamVideoSnapshots:
             self.stopped = True
             if self.ffmpeg_process is not None:
                 logger.info("Stopping ffmpeg process...")
-                subprocess.Popen.kill(self.ffmpeg_process)
+                os.killpg(os.getpgid(self.ffmpeg_process.pid), signal.SIGTERM)
                 self.ffmpeg_process = None
             if self.streamlink_process is not None:
                 logger.info("Stopping streamlink process...")
-                subprocess.Popen.kill(self.streamlink_process)
+                os.killpg(os.getpgid(self.streamlink_process.pid), signal.SIGTERM)
                 self.streamlink_process = None
             logger.info("Video stream stopped!")
         finally:

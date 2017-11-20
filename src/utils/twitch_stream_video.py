@@ -55,22 +55,21 @@ class StreamVideoSnapshots:
         while not self.stopped and not failed:
             img = None
 
-            self.lock.acquire()
-            try:
-                if self.stopped:
-                    break
-                raw_image = self.ffmpeg_process.stdout.read(1920 * 1080 * 3)
-                img = np.fromstring(raw_image, dtype='uint8')
-                if len(img) != 1080 * 1920 * 3:
-                    logger.error("Img bytes number = {}, while expected = {}!".format(len(img), 1080 * 1920 * 3))
-                    failed = True
-                    break
+            ffmpeg_process = self.ffmpeg_process
 
-                img = img.reshape((1080, 1920, 3))
+            if self.stopped:
+                break
+            raw_image = ffmpeg_process.stdout.read(1920 * 1080 * 3)
 
-                self.ffmpeg_process.stdout.flush()
-            finally:
-                self.lock.release()
+            img = np.fromstring(raw_image, dtype='uint8')
+            if len(img) != 1080 * 1920 * 3:
+                logger.error("Img bytes number = {}, while expected = {}!".format(len(img), 1080 * 1920 * 3))
+                failed = True
+                break
+
+            img = img.reshape((1080, 1920, 3))
+
+            ffmpeg_process.stdout.flush()
 
             if img is not None:
                 self.on_image(img)
@@ -113,7 +112,7 @@ if __name__ == '__main__':
     logging.getLogger("requests").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
 
-    channel = config.channel
+    channel = "HoneyMad"
 
     video = StreamVideoSnapshots()
 

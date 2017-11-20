@@ -1,5 +1,7 @@
 import os
 import cv2
+import time
+import fcntl
 import signal
 import logging
 import threading
@@ -33,7 +35,7 @@ class StreamVideoSnapshots:
         streamlink_command = ["streamlink", "twitch.tv/{}".format(channel), "--default-stream", "1080p,1080p60", "--loglevel", "warning",
                               "-o", self.fifo_filename]
         logger.info("streamlink launched: {}".format(" ".join(streamlink_command)))
-        self.streamlink_process = subprocess.Popen(streamlink_command, stderr=subprocess.DEVNULL, preexec_fn=os.setsid)
+        self.streamlink_process = subprocess.Popen(streamlink_command, stderr=subprocess.DEVNULL)
 
         ffmpeg_command = ["ffmpeg",
                           '-i', self.fifo_filename,  # named pipe
@@ -43,7 +45,7 @@ class StreamVideoSnapshots:
                           '-an', '-sn',  # we want to disable audio processing (there is no audio)
                           '-f', 'image2pipe', '-']
         logger.info("ffmpeg launched:     {}".format(" ".join(ffmpeg_command)))
-        self.ffmpeg_process = subprocess.Popen(ffmpeg_command, stdout=subprocess.PIPE, bufsize=10 ** 8, preexec_fn=os.setsid)
+        self.ffmpeg_process = subprocess.Popen(ffmpeg_command, stdout=subprocess.PIPE, bufsize=10 ** 8)
 
         self.stopped = False
 
@@ -52,24 +54,29 @@ class StreamVideoSnapshots:
 
     def run_loop(self):
         failed = False
+        raw_image = b""
+
+        flag = fcntl.fcntl(self.ffmpeg_process.stdout, fcntl.F_GETFL)
+        fcntl.fcntl(self.ffmpeg_process.stdout.fileno(), fcntl.F_SETFL, flag | os.O_NONBLOCK)
+
         while not self.stopped and not failed:
             img = None
 
-            ffmpeg_process = self.ffmpeg_process
-
-            if self.stopped:
-                break
-            raw_image = ffmpeg_process.stdout.read(1920 * 1080 * 3)
-
-            img = np.fromstring(raw_image, dtype='uint8')
-            if len(img) != 1080 * 1920 * 3:
-                logger.error("Img bytes number = {}, while expected = {}!".format(len(img), 1080 * 1920 * 3))
-                failed = True
-                break
-
-            img = img.reshape((1080, 1920, 3))
-
-            ffmpeg_process.stdout.flush()
+            self.lock.acquire()
+            try:
+                if self.stopped:
+                    break
+                new_data = self.ffmpeg_process.stdout.read(1920 * 1080 * 3 - len(raw_image))
+                if new_data is not None and len(new_data) > 0:
+                    raw_image += new_data
+                    if len(raw_image) == 1080 * 1920 * 3:
+                        img = np.fromstring(raw_image, dtype='uint8')
+                        raw_image = b""
+                        img = img.reshape((1080, 1920, 3))
+                else:
+                    time.sleep(0.001)
+            finally:
+                self.lock.release()
 
             if img is not None:
                 self.on_image(img)
@@ -91,14 +98,20 @@ class StreamVideoSnapshots:
         self.lock.acquire()
         try:
             self.stopped = True
-            if self.ffmpeg_process is not None:
-                logger.info("Stopping ffmpeg process...")
-                os.killpg(os.getpgid(self.ffmpeg_process.pid), signal.SIGTERM)
-                self.ffmpeg_process = None
             if self.streamlink_process is not None:
                 logger.info("Stopping streamlink process...")
-                os.killpg(os.getpgid(self.streamlink_process.pid), signal.SIGTERM)
+                try:
+                    os.kill(self.streamlink_process.pid, signal.SIGTERM)
+                except ProcessLookupError as e:
+                    logger.error("Error while terminating streamlink: {}".format(e))
                 self.streamlink_process = None
+            if self.ffmpeg_process is not None:
+                logger.info("Stopping ffmpeg process...")
+                try:
+                    os.kill(self.ffmpeg_process.pid, signal.SIGTERM)
+                except ProcessLookupError as e:
+                    logger.error("Error while terminating ffmpeg: {}".format(e))
+                self.ffmpeg_process = None
             logger.info("Video stream stopped!")
         finally:
             self.lock.release()
@@ -112,7 +125,7 @@ if __name__ == '__main__':
     logging.getLogger("requests").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
 
-    channel = "HoneyMad"
+    channel = config.channel
 
     video = StreamVideoSnapshots()
 

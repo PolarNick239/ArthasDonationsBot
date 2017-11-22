@@ -3,6 +3,7 @@ import cv2
 import time
 import fcntl
 import signal
+import pathlib
 import logging
 import threading
 import subprocess
@@ -14,8 +15,13 @@ logger = logging.getLogger("Stream snapshots")
 class StreamVideoSnapshots:
     def __init__(self):
         self.fifo_filename = "/tmp/stream"
+        self.logs_dir = pathlib.Path("stream_video_logs")
+
         self.streamlink_process = None
         self.ffmpeg_process = None
+
+        self.streamlink_process_log = None
+        self.ffmpeg_process_log = None
 
         self.thread = None
         self.stopped = True
@@ -32,10 +38,15 @@ class StreamVideoSnapshots:
             pass
         os.mkfifo(self.fifo_filename)
 
-        streamlink_command = ["streamlink", "twitch.tv/{}".format(channel), "--default-stream", "1080p,1080p60", "--loglevel", "warning",
+        self.logs_dir.mkdir(exist_ok=True)
+        timestamp = int(time.time())
+
+        streamlink_command = ["streamlink", "twitch.tv/{}".format(channel), "--default-stream", "1080p,1080p60", "--loglevel", "debug",
                               "-o", self.fifo_filename]
         logger.info("streamlink launched: {}".format(" ".join(streamlink_command)))
-        self.streamlink_process = subprocess.Popen(streamlink_command, stderr=subprocess.DEVNULL)
+
+        self.streamlink_process_log = (self.logs_dir / "{}_streamlink".format(timestamp)).open("a")
+        self.streamlink_process = subprocess.Popen(streamlink_command, stdout=self.streamlink_process_log, stderr=self.streamlink_process_log)
 
         ffmpeg_command = ["ffmpeg",
                           '-i', self.fifo_filename,  # named pipe
@@ -43,9 +54,14 @@ class StreamVideoSnapshots:
                           "-r", "1",
                           '-vcodec', 'rawvideo',
                           '-an', '-sn',  # we want to disable audio processing (there is no audio)
+                          '-loglevel', 'debug',
                           '-f', 'image2pipe', '-']
         logger.info("ffmpeg launched:     {}".format(" ".join(ffmpeg_command)))
-        self.ffmpeg_process = subprocess.Popen(ffmpeg_command, stdout=subprocess.PIPE, bufsize=10 ** 8)
+
+        self.ffmpeg_process_log = (self.logs_dir / "{}_ffmpeg".format(timestamp)).open("a")
+        self.ffmpeg_process = subprocess.Popen(ffmpeg_command, stdout=subprocess.PIPE, stderr=self.ffmpeg_process_log)
+
+        logger.info("Video start timestamp: {}".format(timestamp))
 
         self.stopped = False
 
@@ -105,6 +121,8 @@ class StreamVideoSnapshots:
                 except ProcessLookupError as e:
                     logger.error("Error while terminating streamlink: {}".format(e))
                 self.streamlink_process = None
+                self.streamlink_process_log.close()
+                self.streamlink_process_log = None
             if self.ffmpeg_process is not None:
                 logger.info("Stopping ffmpeg process...")
                 try:
@@ -112,6 +130,8 @@ class StreamVideoSnapshots:
                 except ProcessLookupError as e:
                     logger.error("Error while terminating ffmpeg: {}".format(e))
                 self.ffmpeg_process = None
+                self.ffmpeg_process_log.close()
+                self.ffmpeg_process_log = None
             logger.info("Video stream stopped!")
         finally:
             self.lock.release()

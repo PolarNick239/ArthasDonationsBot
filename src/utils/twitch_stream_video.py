@@ -17,6 +17,8 @@ class StreamVideoSnapshots:
         self.fifo_filename = "/tmp/stream"
         self.logs_dir = pathlib.Path("stream_video_logs")
 
+        self.channel = None
+
         self.streamlink_process = None
         self.ffmpeg_process = None
 
@@ -25,57 +27,65 @@ class StreamVideoSnapshots:
 
         self.thread = None
         self.stopped = True
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
 
         self.image_callbacks = []
 
     def start(self, channel):
-        self.stop()
-
+        self.lock.acquire()
         try:
-            os.remove(self.fifo_filename)
-        except FileNotFoundError:
-            pass
-        os.mkfifo(self.fifo_filename)
+            self.stop()
+            self.channel = channel
 
-        self.logs_dir.mkdir(exist_ok=True)
-        timestamp = int(time.time())
+            try:
+                os.remove(self.fifo_filename)
+            except FileNotFoundError:
+                pass
+            os.mkfifo(self.fifo_filename)
 
-        streamlink_command = ["streamlink", "twitch.tv/{}".format(channel), "--default-stream", "1080p,1080p60", "--loglevel", "debug",
-                              "-o", self.fifo_filename]
-        logger.info("streamlink launched: {}".format(" ".join(streamlink_command)))
+            self.logs_dir.mkdir(exist_ok=True)
+            timestamp = int(time.time())
 
-        self.streamlink_process_log = (self.logs_dir / "{}_streamlink".format(timestamp)).open("a")
-        self.streamlink_process = subprocess.Popen(streamlink_command, stdout=self.streamlink_process_log, stderr=self.streamlink_process_log)
+            streamlink_command = ["streamlink", "twitch.tv/{}".format(self.channel), "--default-stream", "1080p,1080p60", "--loglevel", "debug",
+                                  "-o", self.fifo_filename]
+            logger.info("streamlink launched: {}".format(" ".join(streamlink_command)))
 
-        ffmpeg_command = ["ffmpeg",
-                          '-i', self.fifo_filename,  # named pipe
-                          '-pix_fmt', 'bgr24',  # opencv requires bgr24 pixel format.
-                          "-r", "1",
-                          '-vcodec', 'rawvideo',
-                          '-an', '-sn',  # we want to disable audio processing (there is no audio)
-                          '-loglevel', 'debug',
-                          '-f', 'image2pipe', '-']
-        logger.info("ffmpeg launched:     {}".format(" ".join(ffmpeg_command)))
+            self.streamlink_process_log = (self.logs_dir / "{}_streamlink".format(timestamp)).open("a")
+            self.streamlink_process = subprocess.Popen(streamlink_command, stdout=self.streamlink_process_log, stderr=self.streamlink_process_log)
 
-        self.ffmpeg_process_log = (self.logs_dir / "{}_ffmpeg".format(timestamp)).open("a")
-        self.ffmpeg_process = subprocess.Popen(ffmpeg_command, stdout=subprocess.PIPE, stderr=self.ffmpeg_process_log)
+            ffmpeg_command = ["ffmpeg",
+                              '-i', self.fifo_filename,  # named pipe
+                              '-pix_fmt', 'bgr24',  # opencv requires bgr24 pixel format.
+                              "-r", "1",
+                              '-vcodec', 'rawvideo',
+                              '-an', '-sn',  # we want to disable audio processing (there is no audio)
+                              '-loglevel', 'debug',
+                              '-f', 'image2pipe', '-']
+            logger.info("ffmpeg launched:     {}".format(" ".join(ffmpeg_command)))
 
-        logger.info("Video start timestamp: {}".format(timestamp))
+            self.ffmpeg_process_log = (self.logs_dir / "{}_ffmpeg".format(timestamp)).open("a")
+            self.ffmpeg_process = subprocess.Popen(ffmpeg_command, stdout=subprocess.PIPE, stderr=self.ffmpeg_process_log)
 
-        self.stopped = False
+            logger.info("Video start timestamp: {}".format(timestamp))
 
-        self.thread = threading.Thread(target=self.run_loop, name="Stream snapshots")
-        self.thread.start()
+            self.stopped = False
+
+            self.thread = threading.Thread(target=self.run_loop, name="Stream snapshots")
+            self.thread.start()
+        finally:
+            self.lock.release()
 
     def run_loop(self):
         failed = False
+        restart = False
         raw_image = b""
 
         flag = fcntl.fcntl(self.ffmpeg_process.stdout, fcntl.F_GETFL)
         fcntl.fcntl(self.ffmpeg_process.stdout.fileno(), fcntl.F_SETFL, flag | os.O_NONBLOCK)
 
-        while not self.stopped and not failed:
+        previous_img_time = time.time()
+
+        while not self.stopped and not failed and not restart:
             img = None
 
             self.lock.acquire()
@@ -94,10 +104,19 @@ class StreamVideoSnapshots:
             finally:
                 self.lock.release()
 
+            current_time = time.time()
+
             if img is not None:
                 self.on_image(img)
+                previous_img_time = current_time
 
-        if failed:
+            if current_time - previous_img_time > 60:
+                logger.error("No image for a minute!")
+                restart = True
+
+        if restart:
+            self.start(self.channel)
+        elif failed:
             self.failed()
 
     def failed(self):

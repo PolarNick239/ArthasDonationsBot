@@ -2,6 +2,7 @@ import time
 import logging
 import requests
 import threading
+import dateutil.parser
 from collections import namedtuple
 
 from utils.file_storage import FileStorage
@@ -10,6 +11,9 @@ logger = logging.getLogger("Stream monitor")
 
 StreamerState = namedtuple('StreamerState',
                            'user_id title game_id')
+
+LastPostState = namedtuple('LastPostState',
+                           'id created_at body')
 
 ChannelState = namedtuple('ChannelState',
                           'status')
@@ -33,6 +37,11 @@ class TwitchStreamerMonitor:
 
         self.streamer_state = FileStorage("streamer_state.json", dirpath="state")
         self.streamer_state.load(StreamerState)
+
+        self.last_post_state = FileStorage("last_post.json", dirpath="state")
+        self.last_post_state.load(LastPostState)
+
+        self.new_post_callbacks = []
 
         self.channel_status_callbacks = []
 
@@ -72,8 +81,26 @@ class TwitchStreamerMonitor:
                 self.ensure_timeout(query_following=False)
                 logger.info("Initial state: title={}, game_name={}".format(self.streamer_state.value.title, game_name))
 
+        iteration = 0
+
         while not self.stopped:
+            iteration += 1
             try:
+                if iteration % 10 == 1:
+                    last_post = self.get_last_post(self.user_id)
+                    if last_post is not None:
+                        new_last_post = LastPostState(**last_post)
+
+                        # RFC 3339 format
+                        # '2017-12-06T14:28:26.084868Z'
+                        new_created_date = dateutil.parser.parse(new_last_post.created_at)
+                        if self.last_post_state.value is None\
+                                or new_created_date > dateutil.parser.parse(self.last_post_state.value.created_at):
+                            self.notify_new_post(new_last_post)
+
+                            self.last_post_state.value = new_last_post
+                            self.last_post_state.save()
+
                 changed = False
                 current_state = self.get_user_stream(self.user_id)
 
@@ -118,6 +145,14 @@ class TwitchStreamerMonitor:
                     self.streamer_state.save()
 
                 time.sleep(self.monitor_timeout)
+
+    def notify_new_post(self, post):
+        logger.info("New post! id={} create_at={} body={}".format(post.id, post.created_at, post.body))
+        for callback in self.new_post_callbacks:
+            callback(post.body)
+
+    def add_new_post_callback(self, callback):
+        self.new_post_callbacks.append(callback)
 
     def notify_channel_status_changed(self, status):
         logger.info("Channel status changed! status={}".format(status))
@@ -233,6 +268,19 @@ class TwitchStreamerMonitor:
                 status = status[:status.index(ad_separator)]
 
         return {'status': status}
+
+    def get_last_post(self, channel_id):
+        # https://dev.twitch.tv/docs/v5/reference/channel-feed#get-feed-post
+        posts_data = self.query_v5("feed", "{}/posts".format(channel_id), limit=1)
+
+        if 'posts' not in posts_data or len(posts_data['posts']) != 1:
+            return None
+
+        last_post = posts_data['posts'][0]
+
+        return {'id': last_post['id'],
+                'created_at': last_post['created_at'],
+                'body': last_post['body']}
 
     def ensure_timeout(self, *, query_following=True):
         current_time = time.time()

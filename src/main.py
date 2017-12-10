@@ -30,6 +30,8 @@ class ArthasBot:
         self.twitch_chat_monitor = IRCTwitchMonitor(twitch_irc_botname, twitch_irc_bot_oauth_key, twitch_channel,
                                                     twitch_irc_host)
 
+        self.waiting_for_screenshot = False
+
         self.clips_ids_by_video_id = FileStorage("clips.json", dirpath="state/clips")
         self.clips = {}
 
@@ -92,12 +94,14 @@ class ArthasBot:
     @synchronized
     def on_stream_started(self, stream_id, title, game_name):
         self.telegram_bot.send_message("Величайший подрубил!\n{}\n{}".format(game_name, title))
+        self.waiting_for_screenshot = True
 
         self.start_donates_detection()
 
     @synchronized
     def on_game_changed(self, game_name):
         self.telegram_bot.send_message("Игра: {}".format(game_name))
+        self.waiting_for_screenshot = True
 
     @synchronized
     def on_title_changed(self, title):
@@ -138,6 +142,20 @@ class ArthasBot:
 
     @synchronized
     def on_video_screen(self, img):
+        if self.waiting_for_screenshot:
+            self.waiting_for_screenshot = False
+            current_time = time.time()
+
+            logger.info("Saving and sending screenshot {}!".format(current_time))
+
+            screenshots_path = "screenshots"
+            pathlib.Path(screenshots_path).mkdir(exist_ok=True)
+            donate_path = screenshots_path + "/{}.png".format(current_time)
+
+            cv2.imwrite(donate_path, img)
+            with open(donate_path, 'rb') as photo_file:
+                self.telegram_bot.send_photo(photo_file)
+
         self.video_frame_index_cur += 1
         frames_passed = self.video_frame_index_cur - self.video_frame_index_prev_processed
 

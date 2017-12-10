@@ -86,33 +86,36 @@ class StreamVideoSnapshots:
         previous_img_time = time.time()
 
         while not self.stopped and not failed and not restart:
-            img = None
-
-            self.lock.acquire()
             try:
-                if self.stopped:
-                    break
-                new_data = self.ffmpeg_process.stdout.read(1920 * 1080 * 3 - len(raw_image))
-                if new_data is not None and len(new_data) > 0:
-                    raw_image += new_data
-                    if len(raw_image) == 1080 * 1920 * 3:
-                        img = np.fromstring(raw_image, dtype='uint8')
-                        raw_image = b""
-                        img = img.reshape((1080, 1920, 3))
-                else:
-                    time.sleep(0.001)
-            finally:
-                self.lock.release()
+                img = None
 
-            current_time = time.time()
+                self.lock.acquire()
+                try:
+                    if self.stopped:
+                        break
+                    new_data = self.ffmpeg_process.stdout.read(1920 * 1080 * 3 - len(raw_image))
+                    if new_data is not None and len(new_data) > 0:
+                        raw_image += new_data
+                        if len(raw_image) == 1080 * 1920 * 3:
+                            img = np.fromstring(raw_image, dtype='uint8')
+                            raw_image = b""
+                            img = img.reshape((1080, 1920, 3))
+                    else:
+                        time.sleep(0.001)
+                finally:
+                    self.lock.release()
 
-            if img is not None:
-                self.on_image(img)
-                previous_img_time = current_time
+                current_time = time.time()
 
-            if current_time - previous_img_time > 60:
-                logger.error("No image for a minute!")
-                restart = True
+                if img is not None:
+                    self.on_image(img)
+                    previous_img_time = current_time
+
+                if current_time - previous_img_time > 60:
+                    logger.error("No image for a minute!")
+                    restart = True
+            except Exception as e:
+                logger.error(e)
 
         if restart:
             self.start(self.channel)

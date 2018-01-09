@@ -93,7 +93,7 @@ class ArthasBot:
 
     @synchronized
     def on_stream_started(self, stream_id, title, game_name):
-        self.telegram_bot.send_message("Величайший подрубил!\n{}\n{}".format(game_name, title))
+        self.telegram_bot.send_message("Величайший подрубил!\n{}\n{}\nhttps://www.twitch.tv/{}".format(game_name, title, self.twitch_monitor.username))
         self.waiting_for_screenshot = True
 
         self.start_donates_detection()

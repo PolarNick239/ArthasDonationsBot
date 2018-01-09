@@ -55,7 +55,9 @@ class TwitchStreamerMonitor:
         self.cache_get_user_id = {}
         self.cache_get_game = {}
 
-        self.ad_separators = [" http://", " [http://"]
+        ad_kw_prefixes = ["http://", "https://", "goo.gl"]
+        self.ad_separators = [" " + kw for kw in ad_kw_prefixes] +\
+                             [" [" + kw for kw in ad_kw_prefixes]
 
     def start(self):
         thread = threading.Thread(target=self.run_loop, name="Stream monitor")

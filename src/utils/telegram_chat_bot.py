@@ -22,7 +22,7 @@ class TelegramChatBot:
         logger.info("Sending message with text: {}".format(text))
 
         self.ensure_timeout()
-        return self.bot.send_message(chat_id="@{}".format(self.channel), text=text)
+        return self.bot.send_message(chat_id="@{}".format(self.channel), text=text, disable_web_page_preview=True)
 
     def edit_message(self, message_id, text):
         logger.info("Editing message with id={}, new text: {}".format(message_id, text))

@@ -6,6 +6,7 @@ import scipy
 import scipy.ndimage
 
 logger = logging.getLogger("Donates detector")
+enable_debug_gui = False
 
 
 # base_color_median_donate_text = [82, 192, 214]
@@ -28,6 +29,9 @@ header_hue = [196, 213]
 header_sat = from_100_to_255([70, 100])
 header_val = from_100_to_255([70, 100])
 
+typical_letter_width = 14
+minimum_donate_border_width = 600
+
 
 def detect_letters(rgb, hue_range, sat_range, val_range, radius):
     assert (3 == rgb.shape[-1])
@@ -39,10 +43,11 @@ def detect_letters(rgb, hue_range, sat_range, val_range, radius):
     val_mask = np.logical_and(hsv[:, :, 2] >= val_range[0], hsv[:, :, 2] <= val_range[1])
     mask = np.logical_and(hue_mask, np.logical_and(sat_mask, val_mask))
 
-    # rgb_copy = rgb.copy()
-    # rgb_copy[~mask] = 0
-    # cv2.imshow("test", rgb_copy)
-    # cv2.waitKey()
+    if enable_debug_gui:
+        rgb_copy = rgb.copy()
+        rgb_copy[~mask] = 0
+        cv2.imshow("test", rgb_copy)
+        cv2.waitKey()
 
     params = cv2.SimpleBlobDetector_Params()
     params.thresholdStep = 1
@@ -62,27 +67,31 @@ def detect_letters(rgb, hue_range, sat_range, val_range, radius):
     mask = np.uint8(mask) * 255
     blobs = detector.detect(mask)
 
-    # blobs_mask = np.uint8(mask)
-    # blobs_mask = np.dstack([blobs_mask, blobs_mask, blobs_mask])
-    # for blob in blobs:
-    #     cv2.circle(blobs_mask, (int(blob.pt[0]), int(blob.pt[1])), int(blob.size), (255, 0, 0), thickness=2)
-    # cv2.imshow("blobs_mask", blobs_mask)
-    # cv2.waitKey()
+    if enable_debug_gui:
+        blobs_mask = np.uint8(mask)
+        blobs_mask = np.dstack([blobs_mask, blobs_mask, blobs_mask])
+        for blob in blobs:
+            cv2.circle(blobs_mask, (int(blob.pt[0]), int(blob.pt[1])), int(blob.size), (255, 0, 0), thickness=2)
+        cv2.imshow("blobs_mask", blobs_mask)
+        cv2.waitKey()
 
     return blobs
 
 
-def letter_graph_by_x(blobs, width, height):
+def letter_graph_by_x(blobs, width, height, forced_blob_width=None):
     letters_by_x = np.zeros(width, np.float32)
 
     for blob in blobs:
-        from_x = max(0, int(blob.pt[0] - blob.size))
-        to_x = min(width, int(blob.pt[0] + blob.size))
+        multiplier = 5
+        blob_size = forced_blob_width if forced_blob_width else blob.size
+        from_x = max(0, int(blob.pt[0] - blob_size))
+        to_x = min(width, int(blob.pt[0] + blob_size))
         letters_by_x[from_x:to_x] += 1
 
-    # import matplotlib.pyplot as plt
-    # plt.plot(letters_by_x)
-    # plt.show()
+    if enable_debug_gui:
+        import matplotlib.pyplot as plt
+        plt.plot(letters_by_x)
+        plt.show()
 
     return letters_by_x
 
@@ -105,8 +114,9 @@ def letter_graph_by_y(letters_blobs, width, height):
 def detect_donate(img):
     height, width = img.shape[:2]
 
-    img_from_y = 750
-    img = img[img_from_y:, :, :]
+    img_from_y = 0
+    img_to_y = 400
+    img = img[img_from_y:img_to_y, :, :]
     radius = 25
 
     header_letters = detect_letters(img, header_hue, header_sat, header_val, radius)
@@ -134,7 +144,8 @@ def detect_donate(img):
 
     donate_graph_x = letter_graph_by_x([blob for blob in itertools.chain(header_letters, donate_letters)
                                         if from_y <= blob.pt[1] <= to_y],
-                                       width, height)
+                                       width, height,
+                                       forced_blob_width=typical_letter_width*4)
 
     donate_graph_x = scipy.ndimage.filters.maximum_filter1d(donate_graph_x, 3 * radius)
     max_radius = 0
@@ -145,8 +156,15 @@ def detect_donate(img):
     #from_x = max(0, width // 2 - max_radius - 3 * radius)
     #to_x = min(width, width // 2 + max_radius + 3 * radius)
 
-    from_x = 0
-    to_x = width
+    # from_x = 0
+    # to_x = width
+
+    from_x = np.nonzero(donate_graph_x)[0][0]
+    to_x = np.nonzero(donate_graph_x)[0][-1]
+    if to_x - from_x < minimum_donate_border_width:
+        center_x = (from_x + to_x) / 2
+        from_x = max(0, center_x - minimum_donate_border_width//2)
+        to_x = min(center_x + minimum_donate_border_width//2, width)
 
     return from_x, to_x, img_from_y + from_y, img_from_y + to_y
 

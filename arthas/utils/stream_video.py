@@ -1,5 +1,8 @@
 import os
-import cv2
+import tempfile
+from io import TextIOWrapper
+from typing import Callable, Optional
+
 import time
 import fcntl
 import signal
@@ -7,35 +10,39 @@ import pathlib
 import logging
 import threading
 import subprocess
+
 import numpy as np
 
 logger = logging.getLogger("Stream snapshots")
 
 
+ImageCallback = Callable[[np.ndarray], None]
+
+
 class StreamVideoSnapshots:
-    def __init__(self):
-        self.fifo_filename = "/tmp/stream"
+    def __init__(self, stream_url: str):
+        with tempfile.NamedTemporaryFile(delete=True) as f:
+            self.fifo_filename = f.name
         self.logs_dir = pathlib.Path("stream_video_logs")
 
-        self.channel = None
+        self.stream_url = stream_url
 
-        self.streamlink_process = None
-        self.ffmpeg_process = None
+        self.streamlink_process: Optional[subprocess.Popen[bytes]] = None
+        self.ffmpeg_process: Optional[subprocess.Popen[bytes]] = None
 
-        self.streamlink_process_log = None
-        self.ffmpeg_process_log = None
+        self.streamlink_process_log: Optional[TextIOWrapper] = None
+        self.ffmpeg_process_log: Optional[TextIOWrapper] = None
 
-        self.thread = None
+        self.thread: Optional[threading.Thread] = None
         self.stopped = True
         self.lock = threading.RLock()
 
-        self.image_callbacks = []
+        self.image_callbacks: list[ImageCallback] = []
 
-    def start(self, channel):
+    def start(self) -> None:
         self.lock.acquire()
         try:
             self.stop()
-            self.channel = channel
 
             try:
                 os.remove(self.fifo_filename)
@@ -46,12 +53,18 @@ class StreamVideoSnapshots:
             self.logs_dir.mkdir(exist_ok=True)
             timestamp = int(time.time())
 
-            streamlink_command = ["streamlink", "twitch.tv/{}".format(self.channel), "--default-stream", "1080p,1080p60", "--loglevel", "debug",
-                                  "-o", self.fifo_filename]
+            streamlink_command = [
+                "streamlink", self.stream_url,
+                "--default-stream", "1080p,1080p60",
+                "--loglevel", "debug",
+                "-o", self.fifo_filename
+            ]
             logger.info("streamlink launched: {}".format(" ".join(streamlink_command)))
 
             self.streamlink_process_log = (self.logs_dir / "{}_streamlink".format(timestamp)).open("a")
-            self.streamlink_process = subprocess.Popen(streamlink_command, stdout=self.streamlink_process_log, stderr=self.streamlink_process_log)
+            self.streamlink_process = subprocess.Popen(
+                streamlink_command, stdout=self.streamlink_process_log, stderr=self.streamlink_process_log
+            )
 
             ffmpeg_command = ["ffmpeg",
                               '-i', self.fifo_filename,  # named pipe
@@ -75,11 +88,13 @@ class StreamVideoSnapshots:
         finally:
             self.lock.release()
 
-    def run_loop(self):
+    def run_loop(self) -> None:
         failed = False
         restart = False
         raw_image = b""
 
+        assert self.ffmpeg_process is not None
+        assert self.ffmpeg_process.stdout is not None
         flag = fcntl.fcntl(self.ffmpeg_process.stdout, fcntl.F_GETFL)
         fcntl.fcntl(self.ffmpeg_process.stdout.fileno(), fcntl.F_SETFL, flag | os.O_NONBLOCK)
 
@@ -97,8 +112,8 @@ class StreamVideoSnapshots:
                     if new_data is not None and len(new_data) > 0:
                         raw_image += new_data
                         if len(raw_image) == 1080 * 1920 * 3:
-                            img = np.fromstring(raw_image, dtype='uint8')
-                            raw_image = b""
+                            img = np.frombuffer(raw_image, dtype=np.uint8)
+                            raw_image = b''
                             img = img.reshape((1080, 1920, 3))
                     else:
                         time.sleep(0.001)
@@ -118,21 +133,21 @@ class StreamVideoSnapshots:
                 logger.error(e)
 
         if restart:
-            self.start(self.channel)
+            self.start()
         elif failed:
             self.failed()
 
-    def failed(self):
+    def failed(self) -> None:
         self.stop()
 
-    def on_image(self, img):
+    def on_image(self, img: np.ndarray) -> None:
         for callback in self.image_callbacks:
             callback(img)
 
-    def add_image_callback(self, callback):
+    def add_image_callback(self, callback: ImageCallback) -> None:
         self.image_callbacks.append(callback)
 
-    def stop(self):
+    def stop(self) -> None:
         self.lock.acquire()
         try:
             self.stopped = True
@@ -143,6 +158,7 @@ class StreamVideoSnapshots:
                 except ProcessLookupError as e:
                     logger.error("Error while terminating streamlink: {}".format(e))
                 self.streamlink_process = None
+                assert self.streamlink_process_log is not None
                 self.streamlink_process_log.close()
                 self.streamlink_process_log = None
             if self.ffmpeg_process is not None:
@@ -152,41 +168,9 @@ class StreamVideoSnapshots:
                 except ProcessLookupError as e:
                     logger.error("Error while terminating ffmpeg: {}".format(e))
                 self.ffmpeg_process = None
+                assert self.ffmpeg_process_log is not None
                 self.ffmpeg_process_log.close()
                 self.ffmpeg_process_log = None
             logger.info("Video stream stopped!")
         finally:
             self.lock.release()
-
-
-if __name__ == '__main__':
-    import config
-
-    logging.basicConfig(level=logging.DEBUG, format=config.logger_format)
-
-    logging.getLogger("requests").setLevel(logging.WARNING)
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-
-    channel = config.channel
-
-    video = StreamVideoSnapshots()
-
-
-    def on_image(img):
-        cv2.imshow("Video", img)
-        key = cv2.waitKey(1)
-        if key != -1:
-            if key == 32:
-                cv2.waitKey()
-            if key == 115:  # S
-                video.stop()
-                print("Stopped... Press one more button to start again!")
-                cv2.waitKey()
-                video.start(channel)
-                print("Started!...")
-            else:
-                print(key)
-
-
-    video.add_image_callback(on_image)
-    video.start(channel)

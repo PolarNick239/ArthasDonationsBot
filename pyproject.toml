@@ -1,0 +1,40 @@
+[tool.poetry]
+name = "arthas"
+version = "0.1.0"
+description = ""
+authors = ["PG_LoLo <novgosh@yandex.ru>"]
+
+[tool.poetry.dependencies]
+python = ">=3.9,<3.11"
+numpy = "^1.22.3"
+scipy = "^1.8.0"
+wrapt = "^1.14.0"
+requests = "^2.27.1"
+matplotlib = "^3.5.1"
+streamlink = "^3.2.0"
+python-telegram-bot = "^13.11"
+opencv-python = "^4.5.5"
+google-api-python-client = "^2.46.0"
+google-auth-oauthlib = "^0.5.1"
+methodtools = "^0.4.5"
+
+[tool.poetry.dev-dependencies]
+pytest = "^5.2"
+mypy = "^0.950"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.mypy]
+follow_imports = "normal"
+check_untyped_defs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_decorators = true
+disallow_any_unimported = true
+warn_return_any = true
+warn_unused_ignores = true
+no_implicit_optional = true
+show_error_codes = true
+mypy_path = 'stubs'

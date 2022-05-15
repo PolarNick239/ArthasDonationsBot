@@ -1,39 +1,49 @@
-import cv2
+# type: ignore
+
 import logging
 import itertools
+from typing import Optional
+
+import cv2
 import numpy as np
 import scipy
 import scipy.ndimage
+from cv2 import KeyPoint
 
 logger = logging.getLogger("Donates detector")
 enable_debug_gui = False
-
 
 # base_color_median_donate_text = [82, 192, 214]
 # base_color_diff_donate_text   = [10, 20, 20]
 # base_color_median_header_text = [232, 155, 20]
 # base_color_diff_header_text   = [20, 20, 20]
 
-def from_100_to_255(range):
+def from_100_to_255(range: tuple[int, int]) -> tuple[float, float]:
     from_value = range[0] * 255 / 100
     to_value = (range[1] * 255 + 99) / 100
-    return [from_value, to_value]
+    return from_value, to_value
 
 
 # donate_hue = [48, 58]
-donate_hue = [40, 58]
-donate_sat = from_100_to_255([50, 100])
-donate_val = from_100_to_255([70, 100])
+donate_hue = (40, 58)
+donate_sat = from_100_to_255((50, 100))
+donate_val = from_100_to_255((70, 100))
 # header_hue = [196, 205]
-header_hue = [196, 213]
-header_sat = from_100_to_255([70, 100])
-header_val = from_100_to_255([70, 100])
+header_hue = (196, 213)
+header_sat = from_100_to_255((70, 100))
+header_val = from_100_to_255((70, 100))
 
 typical_letter_width = 14
 minimum_donate_border_width = 600
 
 
-def detect_letters(rgb, hue_range, sat_range, val_range, radius):
+def detect_letters(
+    rgb: np.ndarray,
+    hue_range: tuple[float, float],
+    sat_range: tuple[float, float],
+    val_range: tuple[float, float],
+    radius: float,
+) -> list[KeyPoint]:
     assert (3 == rgb.shape[-1])
 
     hsv = cv2.cvtColor(rgb, cv2.COLOR_BGR2HSV)
@@ -68,7 +78,7 @@ def detect_letters(rgb, hue_range, sat_range, val_range, radius):
     blobs = detector.detect(mask)
 
     if enable_debug_gui:
-        blobs_mask = np.uint8(mask)
+        blobs_mask = mask.astype(np.uint8)
         blobs_mask = np.dstack([blobs_mask, blobs_mask, blobs_mask])
         for blob in blobs:
             cv2.circle(blobs_mask, (int(blob.pt[0]), int(blob.pt[1])), int(blob.size), (255, 0, 0), thickness=2)
@@ -78,12 +88,16 @@ def detect_letters(rgb, hue_range, sat_range, val_range, radius):
     return blobs
 
 
-def letter_graph_by_x(blobs, width, height, forced_blob_width=None):
+def letter_graph_by_x(
+    blobs: list[KeyPoint], width: int, height: int, forced_blob_width: Optional[float] = None
+) -> np.ndarray:
     letters_by_x = np.zeros(width, np.float32)
 
     for blob in blobs:
+        # from_x = max(0, int(blob.pt[0] - blob.size))
+        # to_x = min(width, int(blob.pt[0] + blob.size))
         multiplier = 5
-        blob_size = forced_blob_width if forced_blob_width else blob.size
+        blob_size = forced_blob_width if forced_blob_width is not None else blob.size
         from_x = max(0, int(blob.pt[0] - blob_size))
         to_x = min(width, int(blob.pt[0] + blob_size))
         letters_by_x[from_x:to_x] += 1
@@ -96,7 +110,7 @@ def letter_graph_by_x(blobs, width, height, forced_blob_width=None):
     return letters_by_x
 
 
-def letter_graph_by_y(letters_blobs, width, height):
+def letter_graph_by_y(letters_blobs: list[KeyPoint], width: int, height: int) -> np.ndarray:
     letters_by_y = np.zeros(height, np.float32)
 
     for blob in letters_blobs:
@@ -111,7 +125,7 @@ def letter_graph_by_y(letters_blobs, width, height):
     return letters_by_y
 
 
-def detect_donate(img):
+def detect_donate(img: np.ndarray) -> Optional[tuple[float, float, float, float]]:
     height, width = img.shape[:2]
 
     img_from_y = 0
@@ -145,7 +159,7 @@ def detect_donate(img):
     donate_graph_x = letter_graph_by_x([blob for blob in itertools.chain(header_letters, donate_letters)
                                         if from_y <= blob.pt[1] <= to_y],
                                        width, height,
-                                       forced_blob_width=typical_letter_width*4)
+                                       forced_blob_width=typical_letter_width * 4)
 
     donate_graph_x = scipy.ndimage.filters.maximum_filter1d(donate_graph_x, 3 * radius)
     max_radius = 0
@@ -169,7 +183,7 @@ def detect_donate(img):
     return from_x, to_x, img_from_y + from_y, img_from_y + to_y
 
 
-def estimate_is_appeared(img0, img1):
+def estimate_is_appeared(img0: np.ndarray, img1: np.ndarray) -> bool:
     threshold = 20
     diff = np.uint8(np.abs(np.float32(img0) - img1))
 
@@ -180,67 +194,8 @@ def estimate_is_appeared(img0, img1):
     return diff != 0
 
 
-def estimate_is_gone(img0, img1):
+def estimate_is_gone(img0: np.ndarray, img1: np.ndarray) -> bool:
     threshold = 20
     diff = np.uint8(np.abs(np.float32(img0) - img1))
 
     return np.uint8(diff > threshold).sum(axis=-1) >= 1
-
-
-def extract_donate_robust(prev, cur, next):
-    is_appeared = estimate_is_appeared(prev, cur)
-    is_gone = estimate_is_gone(cur, next)
-
-    img = cur.copy()
-    img[~is_appeared] = 0
-    img[is_gone] = 0
-
-    xy_range = detect_donate(img)
-
-    if xy_range is None:
-        return None
-    else:
-        from_x, to_x, from_y, to_y = xy_range
-        return cur[from_y:to_y, from_x:to_x]
-
-
-if __name__ == '__main__':
-    import os
-    import sys
-    import config
-
-    logging.basicConfig(level=logging.DEBUG, format=config.logger_format)
-
-    for image_path in sys.argv[1:]:
-        if os.path.isdir(image_path):
-            images = sorted(os.listdir(image_path))
-            assert (len(images) == 3)
-            img0 = cv2.imread(image_path + images[0])
-            img1 = cv2.imread(image_path + images[1])
-            img2 = cv2.imread(image_path + images[2])
-            print("{}:".format(image_path))
-            print("    {} -> {} -> {}".format(images[0], images[1], images[2]))
-            donate = extract_donate_robust(img0, img1, img2)
-            if donate is None:
-                img = img1
-        else:
-            img = cv2.imread(image_path)
-            if img is None:
-                print("File not found: {}".format(image_path))
-                continue
-            xy_range = detect_donate(img)
-
-            if xy_range is None:
-                donate = None
-            else:
-                from_x, to_x, from_y, to_y = xy_range
-                donate = img[from_y:to_y, from_x:to_x]
-
-        if donate is None:
-            print("NO!  {}".format(image_path))
-            cv2.imshow("No donate", img)
-            cv2.waitKey()
-        else:
-            print("YES! {}".format(image_path))
-            cv2.imshow("Donate", donate)
-            cv2.waitKey()

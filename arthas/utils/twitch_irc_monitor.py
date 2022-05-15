@@ -2,29 +2,46 @@ import socket
 import logging
 import threading
 
+from abc import ABC
+from typing import Optional, Callable
+
 logger = logging.getLogger("IRC monitor")
 
 
+OnMessageCallback = Callable[[str, str], None]
+
+
+class ChatMonitor(ABC):
+    def start(self) -> threading.Thread:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+    def add_message_callback(self, callback: OnMessageCallback) -> None:
+        pass
+
+
 # See https://dev.twitch.tv/docs/irc
-class IRCTwitchMonitor:
-    def __init__(self, nickname, oauth_key, channel, host, port=6667):
+class IRCTwitchMonitor(ChatMonitor):
+    def __init__(self, nickname: str, oauth_key: str, channel: str, host: str, port: int = 6667):
         self.nickname = nickname
         self.oauth_key = oauth_key
         self.channel = channel
         self.host = host
         self.port = port
 
-        self.socket = None
+        self.socket: Optional[socket.socket] = None
         self.stopped = False
 
-        self.buffer = b""
-        self.lines = []
+        self.buffer = b''
+        self.lines: list[str] = []
 
-        self.messages_callbacks = []
+        self.messages_callbacks: list[OnMessageCallback] = []
 
         self.connect()
 
-    def connect(self):
+    def connect(self) -> None:
         self.socket = socket.socket()
         logger.info("Connecting socket...")
         self.socket.connect((self.host, self.port))
@@ -45,8 +62,9 @@ class IRCTwitchMonitor:
 
         logger.info("Authorized!")
 
-    def next_line(self):
+    def next_line(self) -> str:
         while len(self.lines) == 0:
+            assert self.socket, 'Socket is not initialized. Probably `connect()` method was not called'
             self.buffer = self.buffer + self.socket.recv(1024)
             if len(self.buffer) == 0:
                 logger.error("Empty buffer!")
@@ -58,15 +76,15 @@ class IRCTwitchMonitor:
 
         return self.lines.pop(0)
 
-    def start(self):
+    def start(self) -> threading.Thread:
         thread = threading.Thread(target=self.run_loop, name="IRC monitor")
         thread.start()
         return thread
 
-    def stop(self):
+    def stop(self) -> None:
         self.stopped = True
 
-    def run_loop(self):
+    def run_loop(self) -> None:
         while not self.stopped:
             line = self.next_line()
 
@@ -84,24 +102,24 @@ class IRCTwitchMonitor:
 
             logger.warning("Unexpected message: {}".format(line))
 
-    def add_message_callback(self, callback):
+    def add_message_callback(self, callback: OnMessageCallback) -> None:
         self.messages_callbacks.append(callback)
 
-    def parse_message(self, line):
+    def parse_message(self, line: str) -> Optional[tuple[str, str]]:
         # Expected format:
         # :<user>!<user>@<user>.tmi.twitch.tv
         parts = line.split('.tmi.twitch.tv PRIVMSG #{} :'.format(self.channel), 1)
         if len(parts) != 2:
             return None
-        username, message = parts
+        raw_username, message = parts
 
-        username = self.parse_username(username)
+        username = self.parse_username(raw_username)
         if not username:
             return None
 
         return username, message
 
-    def parse_username(self, username_part):
+    def parse_username(self, username_part: str) -> Optional[str]:
         # Username part format:
         # :<user>!<user>@<user>
         if not username_part.startswith(":"):
@@ -121,23 +139,24 @@ class IRCTwitchMonitor:
 
         return parts1_23[0]
 
-    def send(self, str):
-        self.socket.send((str + "\r\n").encode("utf-8"))
+    def send(self, content: str) -> None:
+        assert self.socket, 'Socket is not initialized. Probably `connect()` method was not called'
+        self.socket.send((content + "\r\n").encode("utf-8"))
 
-    def send_message(self, message):
+    def send_message(self, message: str) -> None:
         self.send("PRIVMSG #" + self.channel + " :" + message)
 
 
-if __name__ == '__main__':
-    import config
-
-    logging.basicConfig(level=logging.DEBUG, format=config.logger_format)
-
-    monitor = IRCTwitchMonitor(config.nickname, config.oauth_key, config.channel, config.host)
-    monitor.add_message_callback(lambda username, message: logger.debug("[{}] {}".format(username, message)))
-
-    try:
-        thread = monitor.start()
-        thread.join()
-    except KeyboardInterrupt:
-        monitor.stop()
+# if __name__ == '__main__':
+#     import config
+#
+#     logging.basicConfig(level=logging.DEBUG, format=config.logger_format)
+#
+#     monitor = IRCTwitchMonitor(config.nickname, config.oauth_key, config.channel, config.host)
+#     monitor.add_message_callback(lambda username, message: logger.debug("[{}] {}".format(username, message)))
+#
+#     try:
+#         thread = monitor.start()
+#         thread.join()
+#     except KeyboardInterrupt:
+#         monitor.stop()

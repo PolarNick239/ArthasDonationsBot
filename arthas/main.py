@@ -1,22 +1,32 @@
 import logging
+from pathlib import Path
 
+import yaml
 import click
 
 from arthas.utils.arthas_bot import ArthasBot
-from arthas import config
+import arthas.config
 
 
 @click.command()
-@click.option('--google-api-key', default=config.google_api_key, type=str)
-@click.option('--youtube-channel-id', default=config.youtube_channel_id, type=str)
-@click.option('--telegram-token', default=config.telegram_token, type=str)
-@click.option('--telegram-chat-channel', default=config.telegram_chat_channel, type=str)
-def main(google_api_key: str, youtube_channel_id: str, telegram_token: str, telegram_chat_channel: str) -> None:
-    logging.basicConfig(level=logging.DEBUG, format=config.logger_format, filename='bot.log', filemode='a')
+@click.option('-c', '--config-path', default=None, type=Path)
+def main(config_path: Path) -> None:
+    if config_path is not None:
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+    else:
+        config = {}
+
+    logging.basicConfig(level=logging.DEBUG, format=arthas.config.logger_format, filename='bot.log', filemode='a')
 
     logging.getLogger("requests").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("telegram").setLevel(logging.WARNING)
+
+    google_api_key = config.get('google_api_key', arthas.config.google_api_key)
+    youtube_channel_id = config.get('youtube_channel_id', arthas.config.youtube_channel_id)
+    telegram_token = config.get('telegram_token', arthas.config.telegram_token)
+    telegram_chat_channel = config.get('telegram_chat_channel', arthas.config.telegram_chat_channel)
 
     arthas_bot = ArthasBot(
         google_api_key=google_api_key,

@@ -51,7 +51,7 @@ class YoutubeAPI:
 
     def get_video_ids(self, playlist_id: str) -> list[str]:
         found_result = self.query(
-            'playlistItems', part='id,snippet,contentDetails', playlistId=playlist_id, single_data=False
+            'playlistItems', part='id,snippet,contentDetails', playlistId=playlist_id, maxResults=10, single_data=False
         )
         return [item['contentDetails']['videoId'] for item in found_result]
 

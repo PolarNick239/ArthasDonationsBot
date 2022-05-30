@@ -51,7 +51,7 @@ class YoutubeStreamerMonitor:
         self.streamer_state: FileStorage[StreamerState] = FileStorage("streamer_state.json", dirpath="state")
         self.streamer_state.load(StreamerState)
 
-        self.monitor_timeout = 120.0
+        self.monitor_timeout = 60.0
 
         ad_kw_prefixes = ["http://", "https://", "goo.gl"]
         self.ad_separators = [" " + kw for kw in ad_kw_prefixes] + [" [" + kw for kw in ad_kw_prefixes]
@@ -115,7 +115,7 @@ class YoutubeStreamerMonitor:
                     self.check_if_stream_started()
             except Exception as e:
                 logger.error(e)
-                raise e
+                # raise e
             finally:
                 time.sleep(self.monitor_timeout)
 

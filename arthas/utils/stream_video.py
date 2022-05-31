@@ -20,12 +20,12 @@ ImageCallback = Callable[[np.ndarray], None]
 
 
 class StreamVideoSnapshots:
-    def __init__(self, stream_url: str):
+    STREAM_URL = 'https://www.youtube.com/watch?v={video_id}'
+
+    def __init__(self) -> None:
         with tempfile.NamedTemporaryFile(delete=True) as f:
             self.fifo_filename = f.name
         self.logs_dir = pathlib.Path("stream_video_logs")
-
-        self.stream_url = stream_url
 
         self.streamlink_process: Optional[subprocess.Popen[bytes]] = None
         self.ffmpeg_process: Optional[subprocess.Popen[bytes]] = None
@@ -39,7 +39,7 @@ class StreamVideoSnapshots:
 
         self.image_callbacks: list[ImageCallback] = []
 
-    def start(self) -> None:
+    def start(self, video_id: str) -> None:
         self.lock.acquire()
         try:
             self.stop()
@@ -54,7 +54,7 @@ class StreamVideoSnapshots:
             timestamp = int(time.time())
 
             streamlink_command = [
-                "streamlink", self.stream_url,
+                "streamlink", self.STREAM_URL.format(video_id=video_id),
                 "--default-stream", "1080p,1080p60",
                 "--loglevel", "debug",
                 "-o", self.fifo_filename
@@ -83,12 +83,12 @@ class StreamVideoSnapshots:
 
             self.stopped = False
 
-            self.thread = threading.Thread(target=self.run_loop, name="Stream snapshots")
+            self.thread = threading.Thread(target=lambda: self.run_loop(video_id), name="Stream snapshots")
             self.thread.start()
         finally:
             self.lock.release()
 
-    def run_loop(self) -> None:
+    def run_loop(self, video_id: str) -> None:
         failed = False
         restart = False
         raw_image = b""
@@ -133,7 +133,7 @@ class StreamVideoSnapshots:
                 logger.error(e)
 
         if restart:
-            self.start()
+            self.start(video_id)
         elif failed:
             self.failed()
 

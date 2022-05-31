@@ -3,6 +3,7 @@ from enum import Enum, auto, unique
 from typing import Any
 
 import requests
+import xmltodict
 
 from arthas.utils.timeout_watcher import TimeoutWatcher
 
@@ -30,6 +31,8 @@ class VideoInfo:
 
 class YoutubeAPI:
     API_URL = "https://www.googleapis.com/youtube/v3"
+    FEED_URL = 'https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}'
+    MAX_RESULTS = 10
 
     def __init__(self, client_key: str):
         self.client_key = client_key
@@ -51,9 +54,21 @@ class YoutubeAPI:
 
     def get_video_ids(self, playlist_id: str) -> list[str]:
         found_result = self.query(
-            'playlistItems', part='id,snippet,contentDetails', playlistId=playlist_id, maxResults=10, single_data=False
+            'playlistItems',
+            part='id,snippet,contentDetails',
+            playlistId=playlist_id,
+            maxResults=self.MAX_RESULTS,
+            single_data=False,
         )
         return [item['contentDetails']['videoId'] for item in found_result]
+
+    def get_video_id_from_feed(self, channel_id: str) -> str:
+        with requests.Session() as web:
+            response = web.get(self.FEED_URL.format(channel_id=channel_id))
+            data = xmltodict.parse(response.text)
+            video_id = data['feed']['entry'][0]['yt:videoId']
+            assert isinstance(video_id, str)
+            return video_id
 
     def get_video_info(self, video_id: str) -> VideoInfo:
         return self.get_video_infos([video_id])[0]
@@ -92,16 +107,16 @@ class YoutubeAPI:
         if len(kwargs) > 0:
             url += "?" + "&".join(["{}={}".format(key, value) for key, value in kwargs.items()])
 
-        web = requests.Session()
-        self.timeout.ensure_timeout()
-        data = web.get(url).json()
+        with requests.Session() as web:
+            self.timeout.ensure_timeout()
+            data = web.get(url).json()
 
-        items = data.get('items', None)
+            items = data.get('items', None)
 
-        if items is None:
-            return None
+            if items is None:
+                return None
 
-        if single_data:
-            return items[0] if len(items) else None
-        else:
-            return items
+            if single_data:
+                return items[0] if len(items) else None
+            else:
+                return items

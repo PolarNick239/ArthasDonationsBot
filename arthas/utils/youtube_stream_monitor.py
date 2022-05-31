@@ -88,7 +88,10 @@ class YoutubeStreamerMonitor:
         assert self.streamer_state.value is not None
         assert self.streamer_state.value.video_id is None
 
-        video_ids = self.api.get_video_ids(self.streamer_state.value.playlist_id)
+        video_ids = (
+            self.api.get_video_ids(self.streamer_state.value.playlist_id) +
+            [self.api.get_video_id_from_feed(self.streamer_state.value.user_id)]
+        )
         video_statuses = self.api.get_video_infos(video_ids)
 
         for video_status in video_statuses:

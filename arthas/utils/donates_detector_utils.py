@@ -12,6 +12,7 @@ from cv2 import KeyPoint
 
 logger = logging.getLogger("Donates detector")
 enable_debug_gui = False
+enable_debug_dir = None
 
 # base_color_median_donate_text = [82, 192, 214]
 # base_color_diff_donate_text   = [10, 20, 20]
@@ -25,11 +26,11 @@ def from_100_to_255(range: tuple[int, int]) -> tuple[float, float]:
 
 
 # donate_hue = [48, 58]
-donate_hue = (40, 58)
+donate_hue = (40, 65)
 donate_sat = from_100_to_255((50, 100))
 donate_val = from_100_to_255((70, 100))
 # header_hue = [196, 205]
-header_hue = (196, 213)
+header_hue = (195, 213)
 header_sat = from_100_to_255((70, 100))
 header_val = from_100_to_255((70, 100))
 
@@ -43,8 +44,17 @@ def detect_letters(
     sat_range: tuple[float, float],
     val_range: tuple[float, float],
     radius: float,
+    debug_prefix_name: str=None,
 ) -> list[KeyPoint]:
     assert (3 == rgb.shape[-1])
+
+    if debug_prefix_name is not None and enable_debug_dir:
+        debug_prefix_name = enable_debug_dir + debug_prefix_name
+    else:
+        debug_prefix_name = None
+
+    if debug_prefix_name:
+        cv2.imwrite(debug_prefix_name + "30_image_after_crop_to_detect_letters.png", rgb)
 
     hsv = cv2.cvtColor(rgb, cv2.COLOR_BGR2HSV)
 
@@ -58,6 +68,11 @@ def detect_letters(
         rgb_copy[~mask] = 0
         cv2.imshow("test", rgb_copy)
         cv2.waitKey()
+
+    if debug_prefix_name:
+        rgb_copy = rgb.copy()
+        rgb_copy[~mask] = 0
+        cv2.imwrite(debug_prefix_name + "31_pixels_with_letters_colo_by_hue_sat_val.png", rgb_copy)
 
     params = cv2.SimpleBlobDetector_Params()
     params.thresholdStep = 1
@@ -81,9 +96,16 @@ def detect_letters(
         blobs_mask = mask.astype(np.uint8)
         blobs_mask = np.dstack([blobs_mask, blobs_mask, blobs_mask])
         for blob in blobs:
-            cv2.circle(blobs_mask, (int(blob.pt[0]), int(blob.pt[1])), int(blob.size), (255, 0, 0), thickness=2)
+            cv2.circle(blobs_mask, (int(blob.pt[0]), int(blob.pt[1])), int(blob.size), (255, 255, 255), thickness=2)
         cv2.imshow("blobs_mask", blobs_mask)
         cv2.waitKey()
+
+    if debug_prefix_name:
+        image_with_blobs = rgb.copy() // 2
+        image_with_blobs[mask == 0] = 0
+        for blob in blobs:
+            cv2.circle(image_with_blobs, (int(blob.pt[0]), int(blob.pt[1])), int(blob.size), (255, 255, 255), thickness=2)
+        cv2.imwrite(debug_prefix_name + "32_pixels_with_letters_in_blobs.png", image_with_blobs)
 
     return blobs
 
@@ -124,6 +146,23 @@ def letter_graph_by_y(letters_blobs: list[KeyPoint], width: int, height: int) ->
 
     return letters_by_y
 
+def plot_graph_for_blobs(img: np.ndarray, letters_blobs: list[KeyPoint]) -> np.ndarray:
+    img_with_letters_hists = img.copy() // 2
+    h, w = img.shape[:2]
+
+    graph = letter_graph_by_y(letters_blobs, w, h)
+
+    for blob in letters_blobs:
+        cv2.circle(img_with_letters_hists, (int(blob.pt[0]), int(blob.pt[1])), int(blob.size), (255, 255, 255), thickness=2)
+
+    max_count = max(1, np.max(graph))
+    cv2.rectangle(img_with_letters_hists, (0, 0), (int(0.25 * w + 10), h), (0, 0, 0), -1)
+    for y in range(h):
+        scaled_count = int(graph[y] * 0.25 * w / max_count)
+        cv2.line(img_with_letters_hists, (0, y), (scaled_count, y), (255, 255, 255))
+
+    return img_with_letters_hists
+
 
 def detect_donate(img: np.ndarray) -> Optional[tuple[float, float, float, float]]:
     height, width = img.shape[:2]
@@ -133,14 +172,18 @@ def detect_donate(img: np.ndarray) -> Optional[tuple[float, float, float, float]
     img = img[img_from_y:img_to_y, :, :]
     radius = 25
 
-    header_letters = detect_letters(img, header_hue, header_sat, header_val, radius)
+    header_letters = detect_letters(img, header_hue, header_sat, header_val, radius, debug_prefix_name="30_header_")
     header_graph_y = letter_graph_by_y(header_letters, width, height)
+    if enable_debug_dir:
+        cv2.imwrite(enable_debug_dir + "30_header_99_plot_blobs_hists.png", plot_graph_for_blobs(img, header_letters))
     donate_header_y = np.argmax(header_graph_y)
     if header_graph_y[donate_header_y] < 7:
         return None
 
-    donate_letters = detect_letters(img, donate_hue, donate_sat, donate_val, radius)
+    donate_letters = detect_letters(img, donate_hue, donate_sat, donate_val, radius, debug_prefix_name="31_donate_")
     donate_graph_y = letter_graph_by_y(donate_letters, width, height)
+    if enable_debug_dir:
+        cv2.imwrite(enable_debug_dir + "31_donate_99_plot_blobs_hists.png", plot_graph_for_blobs(img, donate_letters))
     if np.max(donate_graph_y) < 8:
         return None
 
@@ -184,12 +227,12 @@ def detect_donate(img: np.ndarray) -> Optional[tuple[float, float, float, float]
 
 
 def estimate_is_appeared(img0: np.ndarray, img1: np.ndarray) -> bool:
-    threshold = 20
+    threshold = 50
     diff = np.uint8(np.abs(np.float32(img0) - img1))
 
     diff = 255 * np.uint8(np.uint8(diff > threshold).sum(axis=-1) >= 1)
-    # diff = cv2.erode(diff, np.ones((3, 3), np.uint8), 1)
-    # diff = cv2.dilate(diff, np.ones((3, 3), np.uint8), 1)
+    diff = cv2.erode(diff, np.ones((5, 5), np.uint8), 1)
+    diff = cv2.dilate(diff, np.ones((5, 5), np.uint8), 1)
 
     return diff != 0
 
@@ -197,5 +240,7 @@ def estimate_is_appeared(img0: np.ndarray, img1: np.ndarray) -> bool:
 def estimate_is_gone(img0: np.ndarray, img1: np.ndarray) -> bool:
     threshold = 20
     diff = np.uint8(np.abs(np.float32(img0) - img1))
+    diff = cv2.erode(diff, np.ones((5, 5), np.uint8), 1)
+    diff = cv2.dilate(diff, np.ones((5, 5), np.uint8), 1)
 
     return np.uint8(diff > threshold).sum(axis=-1) >= 1

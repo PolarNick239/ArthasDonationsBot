@@ -14,7 +14,7 @@ import arthas.utils.donates_detector_utils
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG, format=config.logger_format)
 
-    arthas.utils.donates_detector_utils.enable_debug_gui = True
+    arthas.utils.donates_detector_utils.enable_debug_dir = "debug/"
 
     for image_path in sys.argv[1:]:
         if os.path.isdir(image_path):

@@ -43,9 +43,11 @@ if __name__ == '__main__':
 
         if donate is None:
             print("NO!  {}".format(image_path))
-            cv2.imshow("No donate", img)
-            cv2.waitKey()
+            # cv2.imshow("No donate", img)
+            # cv2.waitKey()
         else:
             print("YES! {}".format(image_path))
-            cv2.imshow("Donate", donate)
-            cv2.waitKey()
+            if arthas.utils.donates_detector_utils.enable_debug_dir:
+                cv2.imwrite(arthas.utils.donates_detector_utils.enable_debug_dir + "99_detected_donate.png", donate)
+            # cv2.imshow("Donate", donate)
+            # cv2.waitKey()
